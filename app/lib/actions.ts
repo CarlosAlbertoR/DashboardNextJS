@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-const FormSchema = z.object({
+const InvoiceFormSchema = z.object({
   id: z.string(),
   customerId: z.string({ invalid_type_error: 'Please select a customer.' }),
   amount: z.coerce
@@ -19,16 +19,42 @@ const FormSchema = z.object({
   date: z.string(),
 });
 
-const CreateInvoice = FormSchema.omit({ id: true, date: true });
-const UpdateInvoice = FormSchema.omit({ id: true, date: true });
+const CustomerFormSchema = z.object({
+  id: z.string(),
+  customerName: z.string().min(4, {
+    message: 'Customer name must be at least 4 characters.',
+  }),
+  customerEmail: z.string().email({
+    message: 'Please enter a valid email address.',
+  }),
+  image: z.string().url({
+    message: 'Please choose an image.',
+  }),
+});
 
-export type State = {
+const CreateInvoice = InvoiceFormSchema.omit({ id: true, date: true });
+const UpdateInvoice = InvoiceFormSchema.omit({ id: true, date: true });
+
+const CreateCustomer = CustomerFormSchema.omit({ id: true });
+const UpdateCustomer = CustomerFormSchema.omit({ id: true });
+
+export type StateInvoice = {
   errors?: {
     customerId?: string[];
     amount?: string[];
     status?: string[];
   };
   message?: string | null;
+};
+
+export type StateCustomer = {
+  errors?: {
+    customerName?: string[];
+    customerEmail?: string[];
+    image?: string[];
+  };
+  message?: string | null;
+  image?: string | null;
 };
 
 export async function authenticate(
@@ -50,7 +76,10 @@ export async function authenticate(
   }
 }
 
-export async function createInvoice(prevState: State, formData: FormData) {
+export async function createInvoice(
+  prevState: StateInvoice,
+  formData: FormData,
+) {
   // Validate form using Zod
   const validatedFields = CreateInvoice.safeParse({
     customerId: formData.get('customerId'),
@@ -90,7 +119,7 @@ export async function createInvoice(prevState: State, formData: FormData) {
 
 export async function updateInvoice(
   id: string,
-  prevState: State,
+  prevState: StateInvoice,
   formData: FormData,
 ) {
   // Validate form using Zod
@@ -138,9 +167,87 @@ export async function deleteInvoice(id: string) {
   }
 }
 
+export async function createCustomer(
+  prevState: StateCustomer,
+  formData: FormData,
+) {
+  // Validate form using Zod
+  const validatedFields = CreateCustomer.safeParse({
+    customerName: formData.get('customerName'),
+    customerEmail: formData.get('customerEmail'),
+    image: formData.get('image'),
+  });
+
+  // If form validation fails, return errors early. Otherwise, continue.
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Create Customer.',
+    };
+  }
+
+  // Prepare data for insertion into the database
+  const { customerName, customerEmail, image } = validatedFields.data;
+
+  // Insert data into the database
+  try {
+    await sql`
+        INSERT INTO customers (name, email, image_url)
+        VALUES (${customerName}, ${customerEmail}, ${image})
+    `;
+  } catch {
+    return {
+      message: 'Database Error: Failed to Create Customer.',
+    };
+  }
+
+  // Revalidate the cache for the customers page and redirect the user.
+  revalidatePath('/dashboard/customers');
+  redirect('/dashboard/customers');
+}
+
+export async function updateCustomer(
+  id: string,
+  prevState: StateCustomer,
+  formData: FormData,
+) {
+  // Validate form using Zod
+  const validatedFields = CreateCustomer.safeParse({
+    customerName: formData.get('customerName'),
+    customerEmail: formData.get('customerEmail'),
+    image: formData.get('image'),
+  });
+
+  // If form validation fails, return errors early. Otherwise, continue.
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Update Customer.',
+    };
+  }
+
+  // Prepare data for insertion into the database
+  const { customerName, customerEmail, image } = validatedFields.data;
+
+  // Update data into the database
+  try {
+    await sql`
+      UPDATE customers
+      SET name = ${customerName}, email = ${customerEmail}, image_url = ${image}
+      WHERE id = ${id}
+    `;
+  } catch {
+    return { message: 'Database Error: Failed to Update Customer.' };
+  }
+
+  // Revalidate the cache for the customers page and redirect the user.
+  revalidatePath('/dashboard/customers');
+  redirect('/dashboard/customers');
+}
+
 export async function deleteCustomer(id: string) {
   try {
-    await sql`DELETE FROM customer WHERE id = ${id}`;
+    await sql`DELETE FROM customers WHERE id = ${id}`;
     revalidatePath('/dashboard/customers');
     return { message: 'Deleted Customer.' };
   } catch {
